@@ -1,0 +1,435 @@
+---
+title: "chicago_eda"
+author: "Linguo Ren"
+date: "2024-11-24"
+output: html_document
+---
+
+```{r}
+## Load the Data
+data_2013 <- read.csv("data/Crimes_2013-22.csv")
+print(dim(data_2013))
+```
+
+```{r}
+head(data_2013, 30)
+```
+
+```{r}
+library(ggplot2)
+
+# Grouping data by Year and calculating counts
+df_count_per_year <- aggregate(counts ~ Year, data = transform(data_2013, counts = 1), FUN = sum)
+
+# Print the data
+print(df_count_per_year)
+
+# Plotting the data using ggplot2
+ggplot(df_count_per_year, aes(x = Year, y = counts)) +
+  scale_x_continuous(breaks = seq(min(df_count_per_year$Year), max(df_count_per_year$Year), by = 1)) +
+  geom_line(color="red")+
+  labs(title = "Counts per Year", x = "Year", y = "Counts")
+```
+
+```{r}
+## top 5 most common crime type in past 10 years, and only keep the top 10 most common ones
+library(dplyr)
+crime_type_list <- data_2013 %>% 
+  group_by(Primary.Type) %>% 
+  summarise(count = n()) %>% 
+  arrange(desc(count)) %>%
+  head(5)
+print(crime_type_list)
+
+```
+
+```{r, fig.width=20, fig.height=10}
+# Load the data AND only crime_type_list for each year and plot it
+top_5_crime_types <- data_2013 %>%
+  filter(Primary.Type %in% crime_type_list$Primary.Type) %>%
+  group_by(Year, Primary.Type) %>%
+  summarise(counts = n(), .groups = "drop")
+
+##plot it and include the * at each data time
+ggplot(top_5_crime_types, aes(x = Year, y = counts, color = Primary.Type)) +
+  geom_line() +
+  geom_point(size = 1, shape = 16, color = "red") +
+  scale_x_continuous(breaks = seq(min(top_5_crime_types$Year), max(top_5_crime_types$Year), by = 1)) +
+  labs(
+    title = "Top 5 Crime Types Over the Years",
+    x = "Year",
+    y = "Counts",
+    color = "Primary Type"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+# Heatmap for top 5 primary types per year
+ggplot(top_5_crime_types, aes(x = Primary.Type, y = Year , fill = counts)) +
+  geom_tile() +
+  scale_fill_gradient(low = "lightblue", high = "red") +
+  labs(
+    title = "Heatmap of Top 5 Crime Types Over the Years",
+    x = "Primary Type",
+    y = "year",
+    fill = "Counts",
+  ) +
+  scale_y_continuous(breaks = seq(min(top_5_crime_types$Year), max(top_5_crime_types$Year), by = 1)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
+```
+
+```{r}
+## Check the total crime per district
+crime_per_district <- data_2013 %>%
+  filter(!is.na(District)) %>%
+  group_by(District) %>%
+  summarise(counts = n(), .groups = "drop") %>%
+  arrange(District)
+
+## Calcualte the arresting number
+arrest_per_district <- data_2013 %>%
+  filter(!is.na(District)) %>%
+  filter(Arrest == "True") %>%
+  group_by(District) %>%
+  summarise(arrests = n(), .groups = "drop") %>%
+  arrange(District)
+
+
+## plot bar
+ggplot(crime_per_district, aes(x = District, y = counts)) +
+  geom_bar(stat = "identity", fill = "blue") +
+  labs(
+    title = "Total Crime per District",
+    x = "District",
+    y = "Counts"
+  ) +
+  scale_x_continuous(breaks = seq(min(crime_per_district$District), max(crime_per_district$District), by = 1)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+```{r}
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+
+# Filter for valid districts
+valid_districts <- c(1:25)
+data_2013 <- data_2013 %>%
+  filter(District %in% valid_districts)
+
+# Calculate total crimes per district
+crime_per_district <- data_2013 %>%
+  filter(!is.na(District)) %>%
+  group_by(District) %>%
+  summarise(counts = n(), .groups = "drop") %>%
+  arrange(District)
+
+# Calculate total arrests per district
+arrest_per_district <- data_2013 %>%
+  filter(!is.na(District)) %>%
+  filter(Arrest == "True") %>%
+  group_by(District) %>%
+  summarise(arrests = n(), .groups = "drop") %>%
+  arrange(District)
+
+# Combine crimes and arrests into one data frame for plotting
+crime_arrest_df <- left_join(
+  crime_per_district,
+  arrest_per_district,
+  by = "District"
+) %>%
+  pivot_longer(
+    cols = c(counts, arrests),
+    names_to = "type",
+    values_to = "counts"
+  )
+
+# Plot crimes and arrests on the same bar plot
+ggplot(crime_arrest_df, aes(x = District, y = counts, fill = type)) +
+  geom_bar(stat = "identity", position = "dodge") + # Dodge for side-by-side bars
+  labs(
+    title = "Total Crimes and Arrests per District",
+    x = "District",
+    y = "Counts"
+  ) +
+  scale_fill_manual(
+    values = c("counts" = "blue", "arrests" = "red"),
+    name = "Type",
+    labels = c("Arrests", "Crimes")
+  ) +
+  scale_x_continuous(breaks = seq(min(crime_per_district$District), max(crime_per_district$District), by = 1)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+
+#### After creating the bar graph showing the total crimes per district in Chicago, I noticed some missing or invalid values in the district column. Upon further investigation, I discovered that these were not due to missing data but rather because certain districts, including 13, 21, and 23, are not actual police districts in Chicago. To ensure accuracy, I will remove these rows from the dataset and recreate the bar graph. For reference, information on Chicago’s official police districts can be found [here](https://www.chicagopolice.org/police-districts/).
+
+
+```{r}
+## Plot the horizontal line for arrest and counts based on the mean on orignal bar graph
+library(dplyr)
+library(ggplot2)
+
+mean_crime_count <- mean(crime_arrest_df$counts[crime_arrest_df$type == "counts"])
+mean_arrest_count <- mean(crime_arrest_df$counts[crime_arrest_df$type == "arrests"])
+
+# Plot the bar chart with horizontal lines for mean values
+ggplot(crime_arrest_df, aes(x = District, y = counts, fill = type)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_hline(
+    yintercept = mean_crime_count, 
+    linetype = "dashed",
+    color = "blue"
+  ) +
+  geom_hline(
+    yintercept = mean_arrest_count, 
+    linetype = "dashed",
+    color = "red"
+  ) +
+  annotate(
+    "text", x = max(crime_arrest_df$District), y = mean_crime_count, 
+    label = "Mean", color = "blue", vjust = -0.5, hjust = 1
+  ) +
+  annotate(
+    "text", x = max(crime_arrest_df$District), y = mean_arrest_count, 
+    label = "Mean", color = "red", vjust = -0.5, hjust = 1
+  ) +
+  labs(
+    title = "Total Crimes and Arrests per District",
+    x = "District",
+    y = "Counts"
+  ) +
+  scale_fill_manual(
+    values = c("counts" = "blue", "arrests" = "red"),
+    name = "Type",
+    labels = c("Arrests", "Crimes")
+  ) +
+  scale_x_continuous(breaks = seq(min(crime_arrest_df$District), max(crime_arrest_df$District), by = 1)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+
+```{r}
+library(tidyr)
+crime_arrest_df <- cbind(
+  crime_per_district %>% select(District, Crime = counts),
+  arrest_per_district %>% select(Arrest = arrests) %>% mutate(Arrest = Arrest), 
+  arrest_crime_ratio = arrest_per_district$arrests / crime_per_district$counts
+)
+
+## ggplot
+ggplot(crime_arrest_df, aes(x = District, y = arrest_crime_ratio)) +
+  geom_bar(stat = "identity", fill = "purple") +
+  labs(
+    title = "Arrest to Crime Ratio per District",
+    x = "District",
+    y = "Arrest to Crime Ratio"
+  ) +
+  scale_x_continuous(breaks = seq(min(crime_arrest_df$District), max(crime_arrest_df$District), by = 1)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+```{r}
+# Assuming crime_arrest_df is a dataframe with columns "District", "arrest_crime_ratio", and "Arrest"
+
+# Calculate the top 5 districts by arrest-crime ratio
+top_5_arrest_ratio <- crime_arrest_df %>%
+  arrange(desc(arrest_crime_ratio)) %>%
+  head(5) %>%
+  pull(District)
+
+# Calculate the top 5 districts by number of arrests
+top_5_crime_count <- crime_arrest_df %>%
+  arrange(desc(Arrest)) %>%
+  head(5) %>%
+  pull(District)
+
+print("Top 5 Districts by Arrest-Crime Ratio:")
+print(top_5_arrest_ratio)
+
+print("Top 5 Districts by Number of Crimes:")
+print(top_5_crime_count)
+```
+
+```{r}
+## using district one below as the line
+south_district <- c(2,9,8,7,3,6,4,5,22)
+north_district <- c(16,17,24,20,19,18)
+west_district <- c(10,11,12,15,14,25)
+center <- c(1)
+
+# Function to calculate total values for a district group
+calculate_district_summary <- function(districts, group_name, data) {
+  data %>%
+    filter(District %in% districts) %>%
+    summarise(
+      total_arrest_crime_ratio = sum(arrest_crime_ratio, na.rm = TRUE),
+      total_arrest = sum(Arrest, na.rm = TRUE),
+      total_crime = sum(Crime, na.rm = TRUE)
+    ) %>%
+    mutate(District_Group = group_name)
+}
+
+# Define the district groups
+district_groups <- list(
+  South = south_district,
+  North = north_district,
+  West = west_district,
+  Center = center
+)
+
+# Apply the function to each district group and combine results
+district_summary <- bind_rows(
+  lapply(names(district_groups), function(group_name) {
+    calculate_district_summary(district_groups[[group_name]], group_name, crime_arrest_df)
+  })
+)
+
+# Plot the bar chart of ratios for the four district groups
+ggplot(district_summary, aes(x = District_Group, y = total_arrest_crime_ratio)) +
+  geom_bar(stat = "identity", fill = "lightblue") +
+  labs(
+    title = "Total Arrest-Crime Ratio per District Group",
+    x = "District Group",
+    y = "Total Arrest-Crime Ratio"
+  )
+
+```
+```{r}
+## 4 region total crime per year
+# Define the function to calculate counts per year for a district group
+calculate_counts_per_year <- function(data, districts, group_name) {
+  data %>%
+    filter(District %in% districts) %>%
+    group_by(Year) %>%
+    summarise(counts = n(), .groups = "drop") %>%
+    mutate(District_Group = group_name)
+}
+
+# Define district groups
+district_groups <- list(
+  South = south_district,
+  North = north_district,
+  West = west_district,
+  Center = center
+)
+
+# Apply the function to each district group and combine results
+district_counts_per_year <- bind_rows(
+  lapply(names(district_groups), function(group_name) {
+    calculate_counts_per_year(data_2013, district_groups[[group_name]], group_name)
+  })
+)
+
+# View the combined results
+district_counts_per_year
+
+
+## plot it
+ggplot(district_counts_per_year, aes(x = Year, y = counts, color = District_Group)) +
+  geom_line() +
+  labs(
+    title = "Total Crime Counts per Year by District Group",
+    x = "Year",
+    y = "Total Crime Counts",
+  ) +
+  scale_color_manual(
+    values = c("South" = "red", "North" = "blue", "West" = "green", "Center" = "purple"),
+    name = "District Group"
+  ) +
+  scale_x_continuous(breaks = seq(min(district_counts_per_year$Year), max(district_counts_per_year$Year), by = 1))
+
+```
+
+```{r}
+## Plot the total arrest for each district
+# Define the function to calculate total arrests per year for a district group
+calculate_arrests_per_year <- function(data, districts, group_name) {
+  data %>%
+    filter(District %in% districts) %>%
+    filter(Arrest == "True") %>%
+    group_by(Year) %>%
+    summarise(arrests = n(), .groups = "drop") %>%
+    mutate(District_Group = group_name)
+}
+
+# Apply the function to each district group and combine results
+district_arrests_per_year <- bind_rows(
+  lapply(names(district_groups), function(group_name) {
+    calculate_arrests_per_year(data_2013, district_groups[[group_name]], group_name)
+  })
+)
+
+##plot it 
+ggplot(district_arrests_per_year, aes(x = Year, y = arrests, color = District_Group)) +
+  geom_line() +
+  labs(
+    title = "Total Arrest Counts per Year by District Group",
+    x = "Year",
+    y = "Total Arrest Counts",
+  ) +
+  scale_color_manual(
+    values = c("South" = "red", "North" = "blue", "West" = "green", "Center" = "purple"),
+    name = "District Group"
+  ) +
+  scale_x_continuous(breaks = seq(min(district_arrests_per_year$Year), max(district_arrests_per_year$Year), by = 1))
+                     
+```
+
+
+
+```{r}
+# Define a function to calculate arrest ratios per year
+calculate_arrest_ratio_per_year <- function(data, district_group) {
+  data %>%
+    filter(District %in% district_group) %>%
+    group_by(Year) %>%
+    summarise(
+      arrest_crime_ratio = sum(Arrest == "True") / n(),
+      total_crime = n(),
+      total_arrest = sum(Arrest == "True"),
+      .groups = "drop"
+    )
+}
+
+# South District
+south_arrest_ratio_per_year <- calculate_arrest_ratio_per_year(data_2013, south_district)
+
+# North District
+north_arrest_ratio_per_year <- calculate_arrest_ratio_per_year(data_2013, north_district)
+
+# West District
+west_arrest_ratio_per_year <- calculate_arrest_ratio_per_year(data_2013, west_district)
+
+# Center District
+center_arrest_ratio_per_year <- calculate_arrest_ratio_per_year(data_2013, center)
+
+# Combine them by columns and name each column with the region
+arrest_ratio_per_year <- cbind(
+  south_arrest_ratio_per_year %>% select(Year, South = arrest_crime_ratio),
+  north_arrest_ratio_per_year %>% select(North = arrest_crime_ratio),
+  west_arrest_ratio_per_year %>% select(West = arrest_crime_ratio),
+  center_arrest_ratio_per_year %>% select(Center = arrest_crime_ratio)
+)
+
+# Plot line plot
+ggplot(arrest_ratio_per_year, aes(x = Year)) +
+  geom_line(aes(y = South, color = "South")) +
+  geom_line(aes(y = North, color = "North")) +
+  geom_line(aes(y = West, color = "West")) +
+  geom_line(aes(y = Center, color = "Center")) +
+  labs(
+    title = "Arrest-Crime Ratio per Year by District Group",
+    x = "Year",
+    y = "Arrest-Crime Ratio",
+    color = "District Group"
+  ) +
+  scale_x_continuous(breaks = seq(min(arrest_ratio_per_year$Year), max(arrest_ratio_per_year$Year), by = 1)) +
+  scale_color_manual(
+    values = c("South" = "red", "North" = "blue", "West" = "green", "Center" = "purple"),
+    name = "District Group"
+  )
+```
+
+
+
