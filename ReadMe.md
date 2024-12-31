@@ -88,3 +88,5 @@ This project offers a deep dive into Chicago’s crime and arrest patterns, prov
 1. Clone the repository:
    ```bash
    git clone https://github.com/<your-username>/<your-repository>.git
+2. Download the data from Kaggle [Chicago Crime Dataset](https://www.kaggle.com/datasets/chicago/chicago-crime) by the Chicago Police Department 
+3. Run chicago_eda.Rmd
