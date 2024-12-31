@@ -1,0 +1,1084 @@
+---
+title: "Analyzing a Decade of Crime: Insights from Chicago’s Criminal Incident Data (2013-2022)"
+author: "Linguo Ren"
+date: "2024-11-24"
+output: html_document
+fontsize: 12pt
+---
+
+## Introduction
+
+This project utilizes a comprehensive data set from the Chicago Police Department, documenting criminal incidents in the city from 2000 to the present, with daily updates. Due to the dataset’s substantial size, I focused on a subset spanning 2013 to 2022. This refined data set, comprising over 2.5 million records, includes detailed information about each incident, such as:
+
+1.  ID : Unique identifier for the record.
+
+2.  Case Number : The Chicago Police Department RD Number (Records Division Number), which is unique to the incident.
+
+3.  Date : Date when the incident occurred. this is sometimes a best estimate.
+
+4.  Block : The partially redacted address where the incident occurred, placing it on the same block as the actual address.
+
+5.  IUCR : The Illinois Unifrom Crime Reporting code. This is directly linked to the Primary Type and Description. See the list of IUCR codes at <https://data.cityofchicago.org/d/c7ck-438e>.
+
+6.  Primary Type : The primary description of the IUCR code.
+
+7.  Description : The secondary description of the IUCR code, a subcategory of the primary description.
+
+8.  Location Description : Description of the location where the incident occurred.
+
+9.  Arrest : Indicates whether an arrest was made.
+
+10. Domestic : Indicates whether the incident was domestic-related as defined by the Illinois Domestic Violence Act.
+
+11. Beat : Indicates the beat where the incident occurred. A beat is the smallest police geographic area – each beat has a dedicated police beat car. Three to five beats make up a police sector, and three sectors make up a police district. The Chicago Police Department has 22 police districts. See the beats at <https://data.cityofchicago.org/d/aerh-rz74>.
+
+12. District : Indicates the police district where the incident occurred. See the districts at <https://data.cityofchicago.org/d/fthy-xz3r>.
+
+13. Ward : The ward (City Council district) where the incident occurred. See the wards at <https://data.cityofchicago.org/d/sp34-6z76>.
+
+14. Community Area : Indicates the community area where the incident occurred. Chicago has 77 community areas. See the community areas at <https://data.cityofchicago.org/d/cauq-8yn6>.
+
+15. FBI Code : Indicates the crime classification as outlined in the FBI's National Incident-Based Reporting System (NIBRS). See the Chicago Police Department listing of these classifications at <http://gis.chicagopolice.org/clearmap_crime_sums/crime_types.html>.
+
+16. X Coordinate : The x coordinate of the location where the incident occurred in State Plane Illinois East NAD 1983 projection. This location is shifted from the actual location for partial redaction but falls on the same block.
+
+17. Y Coordinate : The y coordinate of the location where the incident occurred in State Plane Illinois East NAD 1983 projection. This location is shifted from the actual location for partial redaction but falls on the same block.
+
+18. Year : Year the incident occurred.
+
+19. Updated On : Date and time the record was last updated.
+
+20. Latitude : The latitude of the location where the incident occurred. This location is shifted from the actual location for partial redaction but falls on the same block.
+
+21. Longitude : The longitude of the location where the incident occurred. This location is shifted from the actual location for partial redaction but falls on the same block.
+
+22. Location : The location where the incident occurred in a format that allows for creation of maps and other geographic operations on this data portal. This location is shifted from the actual location for partial redaction but falls on the same block.
+
+The data set is available at [Chicago Crime (BigQuery Dataset).](https://www.kaggle.com/datasets/chicago/chicago-crime)
+
+To effectively manage the size and complexity of the data set, I focused on transforming it into a more streamlined and insightful format. I chose crime count and arrest ratio as my primary metrics to quantify the data meaningfully. My analysis explores patterns in crime over time, across locations, and by crime type. To ensure the validity of these patterns, I conducted statistical tests to assess their significance.
+
+One of the biggest challenges has been visualizing the data effectively because the data is too complex. Testing posed another significant challenge due to the dataset’s size. To address this, I employed the bootstrap method to test differences in arrest ratios across districts, time of day, and crime types. However, the computational load required for these simulations caused RStudio to crash multiple times.
+
+I decided to work with this data set because I’m really interested in crime data and how it can be used to identify patterns and trends in criminal activity. I think analyzing this data can give valuable insights into the nature of crime in Chicago and potentially help inform strategies for crime prevention and law enforcement. Moreover, Chicago is especially interesting to me because it’s such a major city with a diverse population and a wide variety of crime dynamics, which makes it both challenging and exciting to work with. It’s also personally significant—Chicago was the first city I visited in the United States. In addition, I spent a spring break there last year working on a Bowdoin McKeen Center project. These experiences make me feel connected to the city, so analyzing its crime data feels both meaningful and relevant.
+
+**The goal of this analysis is to explore patterns in Chicago crime data from 2013 to 2022:**
+
+```         
+•   Crime trends over time and by hour of the day.
+•   Arrest ratios by district, crime type, and year.
+•   Relationships between location, time, and crime types.
+•   Statistical tests to confirm patterns and assess significance.
+```
+
+**Key Questions**
+
+```         
+What are the overall trends in crime and arrest ratios in Chicago over the past 10 years?
+How do crime ratios and arrest ratios vary by time (hour of the day, year), location (districts), and crime type?
+```
+
+## EDA
+
+```{r setup, include=FALSE}
+  knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+```{r include=FALSE}
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(stringr)
+library(ggmap)
+library(purrr)
+library(patchwork)
+register_google(key = "AIzaSyBLGXWv_AZe96LN8UZB0Umjh9kqKQnDCs0")
+```
+
+```{r}
+## Load the Data
+data_2013 <- read.csv("data/Crimes_2013-22.csv")
+```
+
+```{r}
+# Randomly sample 1000 points from the data set
+sampled_data <- data_2013 %>%
+  slice_sample(n = min(10000, nrow(data_2013))) # Ensures no more than available rows
+
+# Load Chicago map
+chicago_map <- get_map(location = c(lon = -87.6298, lat = 41.8781), zoom = 11, maptype = "roadmap")
+
+# Plot the heat map
+ggmap(chicago_map) +
+  stat_density_2d(
+    data = sampled_data,
+    aes(x = Longitude, y = Latitude, fill = ..level.., alpha = ..level..),
+    geom = "polygon",
+    bins = 30
+  ) +
+  scale_fill_gradient(low = "yellow", high = "red") +
+  scale_alpha(range = c(0.1, 0.5), guide = FALSE) +
+  labs(
+    title = "Heatmap of Randomly Sampled Crime Locations in Chicago",
+    x = "Longitude",
+    y = "Latitude"
+  ) +
+  theme_minimal()
+```
+
+This figure heat map shows the distribution of total crime incidents in Chicago in the past 10 years based on the data set. The heat map is color-coded to indicate the density of crime incidents, with red areas representing higher densities and yellow areas representing lower densities. The map provides a visual representation of where crime incidents are concentrated in the city. It is clear that there are more frequent crime incidents the loops, south, and west of Chicago, as indicated by the red and orange regions on the map. This information aligns with the general perception of crime distribution in Chicago, where certain areas are known to have higher crime ratios than others such as downtown, south, and west of Chicago.
+
+```{r}
+# Plot for All Districts
+df_count_per_year <- aggregate(counts ~ Year, data = transform(data_2013, counts = 1), FUN = sum)
+
+p1 <- ggplot(df_count_per_year, aes(x = Year, y = counts)) +
+  scale_x_continuous(breaks = seq(min(df_count_per_year$Year), max(df_count_per_year$Year), by = 1)) +
+  geom_line(color = "red") +
+  labs(
+    title = "All District Counts per Year",
+    x = "Year",
+    y = "Counts"
+  )
+
+
+# Function to Filter, Group, and Plot Crime Trends for a Specific District
+plot_district_crime_trends <- function(data, district, color) {
+  district_data <- data %>%
+    filter(District == district) %>%
+    group_by(Year) %>%
+    summarise(counts = n(), .groups = "drop")
+  
+  plot <- ggplot(district_data, aes(x = Year, y = counts)) +
+    scale_x_continuous(breaks = seq(min(district_data$Year), max(district_data$Year), by = 1)) +
+    geom_line(color = color) +
+    labs(
+      title = paste("District", district, "Crime Counts per Year"),
+      x = "Year",
+      y = "Counts"
+    )
+  
+  return(plot)
+}
+
+# Generatio and Print Plots for Districts 1, 7, and 11
+p2 <- plot_district_crime_trends(data_2013, district = 1, color = "blue")
+p3 <- plot_district_crime_trends(data_2013, district = 7, color = "darkgreen")
+p4 <- plot_district_crime_trends(data_2013, district = 11, color = "purple")
+
+print(p1)
+```
+
+This plot shows the overall trend of the total number of crimes in Chicago from 2013 to 2022. The line graph indicates that the number of crimes has generally decreased over the years, with a noticeable drop in 2020. This trend is consistent with the overall decrease in crime ratios observed in many cities during the COVID-19 pandemic. The data suggests that crime ratios in Chicago have been on a downward trend in recent years, which is a positive sign for public safety in the city.
+
+However, there is a slight increase in crime ratios in 2022, which may indicate a reversal of the downward trend. This increase could be due to various factors. To understand what might drive this trend, I broke the plot into the plot with 10 most predominant crime types in Chicago:
+
+```{r}
+d1_data <- data_2013 %>%
+  filter(District == 1)
+
+d7_data <- data_2013 %>%
+  filter(District == 7)
+
+d11_data <- data_2013 %>%
+  filter(District == 11)
+
+
+# Define a function to filter, summarize, and plot top 10 crime types
+plot_top_crime_types <- function(data, crime_type_list, district_label = "Overall") {
+  # Filter and summarize top 10 crime types
+  top_crime_types <- data %>%
+    filter(Primary.Type %in% crime_type_list$Primary.Type) %>%
+    group_by(Year, Primary.Type) %>%
+    summarise(counts = n(), .groups = "drop")
+  
+  plot <- ggplot(top_crime_types, aes(x = Year, y = counts, color = Primary.Type)) +
+    geom_line() +
+    geom_point(size = 1, shape = 16, color = ifelse(district_label == "Overall", "red", "blue")) +
+    scale_x_continuous(breaks = seq(min(top_crime_types$Year), max(top_crime_types$Year), by = 1)) +
+    labs(
+      title = paste("Top 10 Crime Types Over the Years", 
+                    ifelse(district_label == "Overall", "", paste("in", district_label))),
+      x = "Year",
+      y = "Counts",
+      color = "Primary Type"
+    ) +
+    theme_minimal()
+  
+  return(plot)
+}
+
+# Generatio the crime type list from the overall data
+crime_type_list <- data_2013 %>%
+  group_by(Primary.Type) %>%
+  summarise(count = n()) %>%
+  arrange(desc(count)) %>%
+  head(10)
+
+# Create and print plots for each data set
+p_total <- plot_top_crime_types(data_2013, crime_type_list, district_label = "Overall")
+p1 <- plot_top_crime_types(d1_data, crime_type_list, district_label = "District 1")
+p7 <- plot_top_crime_types(d7_data, crime_type_list, district_label = "District 7")
+p11 <- plot_top_crime_types(d11_data, crime_type_list, district_label = "District 11")
+
+print(p_total)
+```
+
+As we can see, the top crime types in Chicago are consistently reported across different districts, with theft, battery, and criminal damage being the most common. This suggests that certain types of crimes are prevalent throughout the city, regardless of the district. However, there are some variations in the counts of specific crime types across districts, which may indicate differences in crime dynamics and law enforcement priorities. By analyzing these trends, we can gain valuable insights into the nature of crime in Chicago.
+
+```{r}
+# Filter for valid districts
+valid_districts <- c(1:25)
+data_2013 <- data_2013 %>%
+  filter(District %in% valid_districts)
+
+# Calculate total crimes per district
+crime_per_district <- data_2013 %>%
+  filter(!is.na(District)) %>%
+  group_by(District) %>%
+  summarise(counts = n(), .groups = "drop") %>%
+  arrange(District)
+
+# Calculate total arrests per district
+arrest_per_district <- data_2013 %>%
+  filter(!is.na(District)) %>%
+  filter(Arrest == "True") %>%
+  group_by(District) %>%
+  summarise(arrests = n(), .groups = "drop") %>%
+  arrange(District)
+
+# Combine crimes and arrests into one data frame for plotting
+crime_arrest_df <- left_join(
+  crime_per_district,
+  arrest_per_district,
+  by = "District"
+) %>%
+  pivot_longer(
+    cols = c(counts, arrests),
+    names_to = "type",
+    values_to = "counts"
+  )
+
+
+mean_crime_count <- mean(crime_arrest_df$counts[crime_arrest_df$type == "counts"])
+mean_arrest_count <- mean(crime_arrest_df$counts[crime_arrest_df$type == "arrests"])
+
+# Plot the bar chart with horizontal lines for mean values
+pg <- ggplot(crime_arrest_df, aes(x = District, y = counts, fill = type)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_hline(
+    yintercept = mean_crime_count, 
+    linetype = "dashed",
+    color = "blue"
+  ) +
+  geom_hline(
+    yintercept = mean_arrest_count, 
+    linetype = "dashed",
+    color = "red"
+  ) +
+  annotate(
+    "text", x = max(crime_arrest_df$District), y = mean_crime_count, 
+    label = "Mean", color = "blue", vjust = -0.5, hjust = 1
+  ) +
+  annotate(
+    "text", x = max(crime_arrest_df$District), y = mean_arrest_count, 
+    label = "Mean", color = "red", vjust = -0.5, hjust = 1
+  ) +
+  labs(
+    title = "Total Crimes and Arrests per District",
+    x = "District",
+    y = "Counts"
+  ) +
+  scale_fill_manual(
+    values = c("counts" = "blue", "arrests" = "red"),
+    name = "Type",
+    labels = c("Arrests", "Crimes")
+  ) +
+  scale_x_continuous(breaks = seq(min(crime_arrest_df$District), max(crime_arrest_df$District), by = 1)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+print(pg)
+        
+```
+
+#### Clarification: District 13, 21, and 23 no longer exist, so they are not included in the analysis.
+
+In this figure, we can see the total number of crimes and arrests per district in Chicago for the past 10 years. The bar chart shows the distribution of crimes and arrests across different districts, with each district represented by a bar. The blue bars represent the total number of crimes reported in each district, while the red bars represent the total number of arrests made in each district. The dashed blue line indicates the average number of crimes across all districts, while the dashed red line indicates the average number of arrests across all districts. This visualization provides a clear comparison of crime and arrest ratios across different districts in Chicago, highlighting variations in law enforcement activity and crime reporting. From the plot, we can see that the number of crimes and arrests varies significantly across districts, with some districts reporting higher crime ratios and arrest ratios than others. However, we should also consider the population density and other factors that may influence crime ratios in each district. To gain a better insight, I would like to introduce a new measure, the arrest to crime ratio, which can help us understand the effectiveness of law enforcement efforts in each district.
+
+```{r}
+crime_arrest_df <- cbind(
+  crime_per_district %>% select(District, Crime = counts),
+  arrest_per_district %>% select(Arrest = arrests) %>% mutate(Arrest = Arrest), 
+  arrest_crime_ratio = arrest_per_district$arrests / crime_per_district$counts
+)
+
+## ggplot and plot the average line
+acr <- ggplot(crime_arrest_df, aes(x = District, y = arrest_crime_ratio)) +
+  geom_bar(stat = "identity", fill = "purple") +
+  labs(
+    title = "Arrest to Crime Ratio per District",
+    x = "District",
+    y = "Arrest to Crime Ratio"
+  ) +
+  scale_x_continuous(breaks = seq(min(crime_arrest_df$District), max(crime_arrest_df$District), by = 1)) +
+ geom_hline(yintercept = mean(crime_arrest_df$arrest_crime_ratio), linetype = "dashed", color = "red") +theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+print(acr)
+```
+
+#### Clarification: District 13, 21, and 23 no longer exist, so they are not included in the analysis.
+
+The above image is the bar chart showing the arrest-to-crime ratio per district in Chicago. The arrest-to-crime ratio is calculating using total arrests divided by total crimes in each district, indicating the proportion of crimes that result in arrests. The purple bars represent the arrest-to-crime ratio for each district, with higher values indicating a higher proportion of arrests relative to crimes. The red dashed line represents the average arrest-to-crime ratio across all districts, providing a benchmark for comparison. This visualization allows us to understand there are potentially significant differences in law enforcement effectiveness across districts in Chicago, with some districts having higher arrest-to-crime ratios than others. These variations may be due to differences in law enforcement resources, crime reporting practices, or other factors that influence arrest ratios. However, each crime types may have different arrest-to-crime ratios, so I would like to further investigate the arrest-to-crime ratio for each crime type in Chicago:
+
+```{r}
+# Define a function to calculate and plot arrest ratios
+calculate_and_plot_arrest_ratio <- function(data, district_name = "All Districts") {
+  # Combine 'Other' and 'OTHER OFFENSE' into a single category
+  data <- data %>%
+    mutate(Primary.Type = ifelse(Primary.Type %in% c("Other", "OTHER OFFENSE"), "OTHER OFFENSE", Primary.Type))
+  
+  # Count the number of crimes for each type
+  crime_type_list <- data %>%
+    group_by(Primary.Type) %>%
+    summarise(count = n()) %>%
+    arrange(desc(count))
+  
+  # Count the number of arrests for each crime type
+  arrest_per_crime <- data %>%
+    filter(Arrest == "True") %>%
+    group_by(Primary.Type) %>%
+    summarise(arrests = n(), .groups = "drop") %>%
+    arrange(desc(arrests))
+  
+  # Combine the counts and calculate the arrest ratio
+  crime_arrest_df <- left_join(
+    crime_type_list,
+    arrest_per_crime,
+    by = "Primary.Type"
+  ) %>%
+    mutate(arrest_ratio = arrests / count)
+  
+  # Create the plot
+  p <- ggplot(crime_arrest_df, aes(x = reorder(Primary.Type, -arrest_ratio), y = arrest_ratio)) +
+    geom_bar(stat = "identity", fill = "purple") +
+    labs(
+      title = paste("Arrest Ratio per Crime Type", ifelse(district_name == "All Districts", "", paste("in", district_name))),
+      x = "Crime Type",
+      y = "Arrest Ratio"
+    ) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  
+  return(p)
+}
+
+# Use the function for the data sets
+p <- calculate_and_plot_arrest_ratio(data_2013)
+p1 <- calculate_and_plot_arrest_ratio(d1_data, district_name = "District 1")
+p7 <- calculate_and_plot_arrest_ratio(d7_data, district_name = "District 7")
+p11 <- calculate_and_plot_arrest_ratio(d11_data, district_name = "District 11")
+
+print(p)
+```
+
+From the above figure, we can see the arrest ratio per crime type in Chicago. The bar chart shows the proportion of crimes that result in arrests for each crime type, with higher values indicating a higher arrest ratio. The purple bars represent the arrest ratio for each crime type, with the crime types sorted by the arrest ratio from highest to lowest. This visualization allows us to identify which crime types are more likely to result in arrests and which are less likely. It is shocking that some crimes such as prostitution, gambling, and narcotics have a very high arrest ratio, while others such as theft, battery, and criminal damage have a lower arrest ratio. This may be caused by the low number of total crimes in these categories, which can skew the arrest ratio. It may also can be due to the nature of the crime, the difficulty of apprehending suspects, or other factors that influence arrest ratios. And even within the same crime type, the arrest ratio can vary significantly across districts. To further investigate these variations, I would like to compare the arrest ratios for each crime type across different districts in Chicago:
+
+```{r}
+# Combine overall and District 1 data for comparison
+# Define a function to calculate arrest ratios
+calculate_arrest_ratio <- function(data, district_name = "All Districts") {
+  # Combine 'Other' and 'OTHER OFFENSE' into a single category
+  data <- data %>%
+    mutate(Primary.Type = ifelse(Primary.Type %in% c("Other", "OTHER OFFENSE"), "OTHER OFFENSE", Primary.Type))
+  
+  # Count the number of crimes for each type
+  crime_type_list <- data %>%
+    group_by(Primary.Type) %>%
+    summarise(count = n()) %>%
+    arrange(desc(count))
+  
+  # Count the number of arrests for each crime type
+  arrest_per_crime <- data %>%
+    filter(Arrest == "True") %>%
+    group_by(Primary.Type) %>%
+    summarise(arrests = n(), .groups = "drop") %>%
+    arrange(desc(arrests))
+  
+  # Combine the counts and calculate the arrest ratio
+  crime_arrest_df <- left_join(
+    crime_type_list,
+    arrest_per_crime,
+    by = "Primary.Type"
+  ) %>%
+    mutate(
+      arrest_ratio = arrests / count,
+      # Add the district/source identifier
+      source = district_name 
+    )
+  
+  return(crime_arrest_df)
+}
+
+# Calculate arrest ratios for each data set
+crime_arrest_df <- calculate_arrest_ratio(data_2013, district_name = "Overall")
+crime_arrest_df_d1 <- calculate_arrest_ratio(d1_data, district_name = "District 1")
+crime_arrest_df_d7 <- calculate_arrest_ratio(d7_data, district_name = "District 7")
+crime_arrest_df_d11 <- calculate_arrest_ratio(d11_data, district_name = "District 11")
+
+# Combine data frames for comparison
+crime_comparison_df <- bind_rows(
+  crime_arrest_df,
+  crime_arrest_df_d1,
+  crime_arrest_df_d7,
+  crime_arrest_df_d11
+)
+
+# Create a side-by-side bar plot
+p_comp<-ggplot(crime_comparison_df, aes(x = reorder(Primary.Type, -arrest_ratio), y = arrest_ratio, fill = source)) +
+  geom_bar(stat = "identity", position = position_dodge(width = 0.8)) +
+  labs(
+    title = "Comparison of Arrest Ratios by Crime Type Across Districts",
+    x = "Crime Type",
+    y = "Arrest Ratio"
+  ) +
+  scale_fill_manual(values = c(
+    "Overall" = "red",
+    "District 1" = "blue",
+    "District 7" = "purple",
+    "District 11" = "yellow"
+  )) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+print(p_comp)
+```
+
+In the figure above, I selected three individual districts—District 1 (Downtown), District 7 (South), and District 11 (West)—along with the total data to compare arrest ratios for each crime type across different districts in Chicago. The side-by-side bar plot illustrates the arrest ratio for each crime type, with each district represented by a distinct color. The crime types are sorted by arrest ratio, from highest to lowest, to facilitate easy comparison across districts. This visualization allows us to identify variations in arrest ratios for different crime types across districts, highlighting differences in law enforcement effectiveness and crime dynamics. Although they are some variability in arrest ratios across districts, some crime types such as prostitution, gambling, and narcotics have consistently high arrest ratios across all districts, while others such as theft, battery, and criminal damage have lower arrest ratios.
+
+```{r}
+# Define a function for data preparation
+prepare_crime_data <- function(crime_arrest_df, crime_data, district_label) {
+  top_10_crime_types <- crime_arrest_df$Primary.Type[1:10]
+  
+  crime_data <- crime_data %>%
+    mutate(
+      Primary.Type = ifelse(Primary.Type %in% top_10_crime_types, Primary.Type, "Other"),
+      Primary.Type = ifelse(Primary.Type %in% c("Other", "OTHER OFFENSE"), "OTHER OFFENSE", Primary.Type),
+      Primary.Type = ifelse(Primary.Type == "Other", paste("Other -", district_label), Primary.Type)
+    )
+  
+  crime_type_year <- crime_data %>%
+    group_by(Year, Primary.Type) %>%
+    summarise(counts = n(), .groups = "drop")
+  
+  return(crime_type_year)
+}
+
+# Define a function for plotting
+plot_crime_data <- function(crime_type_year, title) {
+  ggplot(crime_type_year, aes(x = Year, y = counts, fill = Primary.Type)) +
+    geom_bar(stat = "identity", position = "fill") +
+    labs(
+      title = title,
+      x = "Year",
+      y = "Proportion",
+      fill = "Primary Type"
+    ) +
+    scale_x_continuous(breaks = seq(min(crime_type_year$Year), max(crime_type_year$Year), by = 1)) +
+    theme_minimal()
+}
+
+# Apply the functions to the data sets
+crime_type_year <- prepare_crime_data(crime_arrest_df, data_2013, "Total")
+crime_type_year_d1 <- prepare_crime_data(crime_arrest_df_d1, d1_data, "Dist 1")
+crime_type_year_d7 <- prepare_crime_data(crime_arrest_df_d7, d7_data, "Dist 7")
+crime_type_year_d11 <- prepare_crime_data(crime_arrest_df_d11, d11_data, "Dist 11")
+
+
+p1 <- plot_crime_data(crime_type_year, "Proportion of Total Crimes by Type (Yearly)")
+# p2 <- plot_crime_data(crime_type_year_d1, "Dist 1 Crime Types Over the Years")
+# p7 <- plot_crime_data(crime_type_year_d7, "Dist 7 Crime Types Over the Years")
+# p11 <- plot_crime_data(crime_type_year_d11, "Dist 11 Crime Types Over the Years")
+
+```
+
+```{r}
+#plot arrest total each year but with the proportion of the crime type
+# Define a function for data preparation
+prepare_arrest_data <- function(crime_arrest_df, crime_data, district_label) {
+  top_10_crime_types <- crime_arrest_df$Primary.Type[1:10]
+  
+  crime_data <- crime_data %>%
+    mutate(
+      Primary.Type = ifelse(Primary.Type %in% top_10_crime_types, Primary.Type, "Other"),
+      Primary.Type = ifelse(Primary.Type %in% c("Other", "OTHER OFFENSE"), "OTHER OFFENSE", Primary.Type),
+      Primary.Type = ifelse(Primary.Type == "Other", paste("Other -", district_label), Primary.Type)
+    )
+  
+  crime_type_year <- crime_data %>%
+    filter(Arrest == "True") %>%
+    group_by(Year, Primary.Type) %>%
+    summarise(counts = n(), .groups = "drop")
+  
+  return(crime_type_year)
+}
+
+arrest_type_year <- prepare_arrest_data(crime_arrest_df, data_2013, "Total")
+
+p2 <- ggplot(arrest_type_year, aes(x = Year, y = counts, fill = Primary.Type)) +
+  geom_bar(stat = "identity", position = "fill") +
+  labs(
+    title = "Proportion of Arrests by Crime Type (Yearly)",
+    x = "Year",
+    y = "Proportion",
+    fill = "Primary Type"
+  ) +
+  scale_x_continuous(breaks = seq(min(arrest_type_year$Year), max(arrest_type_year$Year), by = 1)) +
+  theme_minimal()
+```
+
+```{r, fig.width=20, fig.height=10}
+combined_plot <- p1 + p2 + 
+  plot_layout(guides = "collect")
+
+print(combined_plot)
+
+```
+
+
+The above figure shows the proportion of total crimes and arrests by crime type in Chicago over the past 10 years. The bar chart on the left illustrates the proportion of total crimes by crime type, with each crime type represented by a distinct color. The bar chart on the right shows the proportion of arrests by crime type, with each crime type again represented by a distinct color.
+
+From the proportion graph, not only can we see how does the arrest/count of one crime type change over the years, but also we can see the proportion of the crime type/arrest comparing to the other crimes within the same year. 
+
+```{r}
+# Convert the Date column to POSIXct and extract the hour
+data_2013 <- data_2013 %>%
+  mutate(
+    Date = as.POSIXct(Date, format = "%m/%d/%Y %I:%M:%S %p"), # Convert to POSIXct
+    hour = format(Date, "%H") # Extract the hour in 24-hour format
+  )
+
+# Filter out rows where hour is NA
+data_2013 <- data_2013 %>%
+  filter(!is.na(hour))
+
+# Group by hour and count the number of crimes
+hourly_crimes <- data_2013 %>%
+  group_by(hour) %>%
+  summarize(crime_count = n(), .groups = 'drop')
+
+# Plot
+ggplot(hourly_crimes, aes(x = hour, y = crime_count)) +
+  geom_col(fill = "blue", color = "black") +
+  labs(
+    title = "Number of Crimes by Hour of the Day (2013)",
+    x = "Hour of the Day",
+    y = "Number of Crimes"
+  ) +
+  theme_minimal()
+
+```
+
+The above figure shows the number of crimes reported in Chicago by hour of the day. The bar chart illustrates the distribution of crimes across different hours, with each hour represented by a bar. The chart indicates that crime ratios tend to be higher during the midnight and the lunch hours. This pattern is consistent with the general understanding that crime ratios are often higher during the night when there are fewer people around to witness or intervene in criminal activities. The lunch hours may be due to the fact that people are out and about during this time, making it easier for criminals to target them. There is also a big drop in crime ratios during the early morning hours especially from 12am to 1am.
+
+```{r}
+## group by year then plot the line for each year total crime at each hour
+## drop na
+yearly_hourly_crimes <- data_2013 %>%
+  group_by(Year, hour) %>%
+  summarize(crime_count = n(), .groups = 'drop') %>%
+  drop_na()
+
+# Assuming your data is stored in a data frame called yearly_hourly_crimes
+
+# Create the plot
+ggplot(yearly_hourly_crimes, aes(x = hour, y = crime_count, group = Year, color = as.factor(Year))) +
+  geom_line() +
+  labs(
+    title = "Hourly Crime Trends by Year",
+    x = "Hour of Day",
+    y = "Crime Count",
+    color = "Year"
+  ) +
+  theme_minimal()
+  
+```
+
+To understand the hourly crime trends by year, I plotted the line graph above. The line graph shows the number of crimes reported in Chicago by hour of the day for each year from 2013 to 2022. Each line represents a different year, with the color indicating the year. The graph illustrates how crime ratios have changed over time, with some years showing an increase in crime ratios during certain hours while others show a decrease. However, all years are following very similar pattern as shown in the previous plot that represent the total crime count by hour of the day. This shows that the hourly crime trends have remained relatively consistent over the past 10 years, with some fluctuations in crime ratios during certain hours.
+
+```{r}
+## Add arrest ratio to the data frame
+hourly_arrests <- data_2013 %>%
+  group_by(hour) %>%
+  summarize(arrest_count = sum(Arrest == "True"), .groups = 'drop')
+
+hourly_crimes <- left_join(hourly_crimes, hourly_arrests, by = "hour")
+
+# Calculate the arrest ratio
+hourly_crimes <- hourly_crimes %>%
+  mutate(arrest_ratio = arrest_count / crime_count)
+
+# Plot the arrest ratio
+ggplot(hourly_crimes, aes(x = hour, y = arrest_ratio)) +
+  geom_col(fill = "purple", color = "black") +
+  labs(
+    title = "Arrest ratio by Hour of the Day (2013)",
+    x = "Hour of the Day",
+    y = "Arrest ratio"
+  ) +
+  theme_minimal()
+```
+
+People may expect that the arrest ratio by hour would be similar to the crime ratio by hour, but the above figure shows that the arrest ratio by hour of the day in Chicago is quite different. The bar chart illustrates the arrest ratio for crimes reported at different hours, with each hour represented by a bar. Some highlights to point out, the highest arrest ratio is not during some of the highest crime hours, such as midnight, but it is around 7pm and 8pm. This may be due to the crimes type (prostitution and gambling) that are more likely to be reported during these hours, or the police force is more active during these hours.
+
+```{r}
+# Group by Year and hour, calculate crime count and arrest ratio, drop NAs
+yearly_hourly_crimes <- data_2013 %>%
+  group_by(Year, hour) %>%
+  summarize(
+    crime_count = n(),
+    arrest_count = sum(Arrest == "True", na.rm = TRUE),
+    .groups = 'drop'
+  ) %>%
+  mutate(arrest_ratio = arrest_count / crime_count) %>%
+  drop_na()
+
+ggplot(yearly_hourly_crimes, aes(x = hour, y = arrest_ratio, group = Year, color = as.factor(Year))) +
+  geom_line() +
+  labs(
+    title = "Hourly Arrest ratio by Year",
+    x = "Hour of Day",
+    y = "Arrest ratio",
+    color = "Year"
+  ) +
+  theme_minimal()
+
+```
+
+Then I plotted the hourly arrest ratio by year in the above figure. The line graph shows the arrest ratio for crimes reported in Chicago by hour of the day for each year from 2013 to 2022. Each line represents a different year, with the color indicating the year. The graph illustrates how the arrest ratio has changed over time, with some years showing an increase in arrest ratios during certain hours while others show a decrease. The arrest ratio remains relatively consistent over the years, with some fluctuations in arrest ratios during certain hours.
+
+```{r}
+hour_district_data <- data_2013 %>%
+  group_by(District, hour) %>%
+  summarize(
+    crime_count = n(),
+    arrest_count = sum(Arrest == "True", na.rm = TRUE),
+    .groups = 'drop'
+  ) %>%
+  mutate(
+    arrest_ratio = arrest_count / crime_count
+  ) %>%
+  group_by(District) %>%
+  nest()
+
+## heat map 
+heatmap_hour_district <- hour_district_data %>%
+  unnest(data) %>%
+  ggplot(aes(x = District, y = hour, fill = arrest_ratio)) +
+  geom_tile() +
+  scale_fill_gradient(low = "blue", high = "red") +
+  labs(
+    title = "Heatmap of Arrest ratios by District and Hour of the Day",
+    x = "District",
+    y = "Hour of the Day")+
+  scale_x_continuous(breaks = seq(min(hour_district_data$District), max(hour_district_data$District), by = 1))+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+print(heatmap_hour_district)
+
+```
+
+#### Clarification: District 13, 21, and 23 no longer exist, so they are not included in the analysis.
+
+Then I plotted the heat map of arrest ratios by district and hour of the day in the above figure. The heat map illustrates the arrest ratios for crimes reported in Chicago by district and hour of the day. Each cell in the heat map represents the arrest ratio for a specific district and hour, with the color indicating the arrest ratio. The heat map allows us to identify variations in arrest ratios across different districts and hours.
+
+```{r}
+district_data <- data_2013 %>%
+  group_by(District, Primary.Type) %>%
+  summarize(
+    crime_count = n(),
+    arrest_count = sum(Arrest == "True", na.rm = TRUE),
+    .groups = 'drop'
+  ) %>%
+  mutate(
+    arrest_ratio = arrest_count / crime_count
+  ) %>%
+  group_by(District) %>%
+  nest()
+
+
+## heat map and remove district
+heatmap_ar <- district_data %>%
+  unnest(data) %>%
+  ggplot(aes(x = District, y = Primary.Type, fill = arrest_ratio)) +
+  geom_tile() +
+  scale_fill_gradient(low = "blue", high = "red") +
+  labs(
+    title = "Heatmap of Arrest ratios by District and Crime Type",
+    x = "District",
+    y = "Crime Type")+
+  scale_x_continuous(breaks = seq(min(district_data$District), max(district_data$District), by = 1))+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+print(heatmap_ar)
+
+
+```
+
+The above figure shows the heat map of arrest ratios by district and crime type in Chicago. The heat map illustrates the arrest ratios for different crime types reported in each district. Each cell in the heat map represents the arrest ratio for a specific district and crime type, with the color indicating the arrest ratio. The heat map allows us to identify variations in arrest ratios across different districts and crime types.
+
+```{r}
+# Group and calculate hourly statistics by crime type
+crime_type_hour_data <- data_2013 %>%
+  group_by(Primary.Type, hour) %>%
+  summarize(
+    crime_count = n(),
+    arrest_count = sum(Arrest == "True", na.rm = TRUE),
+    .groups = 'drop'
+  ) %>%
+  mutate(
+    arrest_ratio = arrest_count / crime_count
+  )
+
+# Create the heat map
+heatmap_hour_crime_type <- crime_type_hour_data %>%
+  ggplot(aes(x = hour, y = Primary.Type, fill = arrest_ratio)) +
+  geom_tile() +
+  scale_fill_gradient(low = "blue", high = "red") +
+  labs(
+    title = "Heatmap of Arrest ratios by Crime Type and Hour of the Day",
+    x = "Hour of the Day",
+    y = "Crime Type"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 1)  # Rotate x-axis labels for readability
+  )
+
+print(heatmap_hour_crime_type)
+
+
+```
+
+The above figure shows the heat map of arrest ratios by crime type and hour of the day in Chicago. The heat map illustrates the arrest ratios for different crime types reported at each hour of the day. Each cell in the heat map represents the arrest ratio for a specific crime type and hour, with the color indicating the arrest ratio. The heat map allows us to identify variations in arrest ratios across different crime types and hours of the day.
+
+## Testing
+
+### By District
+
+```{r eval=FALSE}
+# Initialize an empty list to store results for each district
+results <- list()
+ci_list <- list()
+
+# Get unique districts
+districts <- unique(data_2013$District)
+
+# Set the number of bootstrap iterations
+n <- 1000
+
+# Loop through each district
+for (district in districts) {
+  # Filter data for the current district
+  district_data <- data_2013 %>% filter(District == district)
+  
+  # Initialize storage for bootstrap samples
+  store <- rep(NA, n)
+  
+  # Total counts for arrests and non-arrests
+  total_arrested <- sum(district_data$Arrest == "True")
+  total_non_arrested <- sum(district_data$Arrest == "False")
+  
+  # Bootstrap sampling
+  for (i in 1:n) {
+    arrest_sample <- sample(district_data$Arrest, total_arrested, replace = TRUE)
+    non_arrest_sample <- sample(district_data$Arrest, total_non_arrested, replace = TRUE)
+    
+    arrest_ratio_sample <- sum(arrest_sample == "True") / total_arrested
+    non_arrest_ratio_sample <- sum(non_arrest_sample == "True") / total_non_arrested
+    
+    store[i] <- arrest_ratio_sample - non_arrest_ratio_sample
+  }
+  
+  # Calculate confidence intervals
+  ci <- quantile(store, probs = c(0.025, 0.975))
+  ci_list[[paste0("District_", district)]] <- ci
+  
+  # Store results for plotting
+  results[[paste0("District_", district)]] <- data.frame(
+    district = district,
+    means = store
+  )
+}
+
+# Combine all results into a single data frame
+combined_results <- do.call(rbind, results)
+
+ggplot(combined_results, aes(x = means, fill = factor(district))) +
+  geom_histogram(color = "black", bins = 30, alpha = 0.6, position = "identity") +
+  facet_wrap(~district, scales = "free") +
+  geom_vline(data = data.frame(ci_list), aes(xintercept = unlist(ci_list), group = district), 
+             linetype = "dashed", color = "red") +
+  labs(
+    title = "Bootstrap Distribution of Arrest ratio Differences by District",
+    x = "Arrest ratio Difference",
+    y = "Frequency",
+    fill = "District"
+  ) +
+  theme_minimal()
+```
+
+![](./By%20District.png)
+
+This analysis uses a bootstrap-based hypothesis testing approach to compare the proportion of “arrested” cases with the proportion of “non-arrested” cases within each district. Under the null hypothesis, there is no difference between these proportions; the alternative hypothesis states that there is a significant difference.
+
+By resampling the data 1,000 times with replacement, the script generates a bootstrap distribution of arrest-ratio differences for each district The results suggest that these differences approximate a normal distribution across all hours, and their 95% confidence intervals—derived from the 2.5th and 97.5th percentiles—consistently include zero. Because zero is included in every confidence interval, we fail to reject the null hypothesis at the 5% significance level. In other words, the data do not provide sufficient evidence of a real difference in arrest ratios across the “arrested” and “non-arrested” for any given district.
+
+### By Hour
+
+```{r eval=FALSE}
+# Convert 'hour' to numeric if it's not already
+data_2013 <- data_2013 %>%
+  mutate(hour = as.numeric(hour))
+
+# Get unique hours and sort them
+hours <- sort(unique(data_2013$hour))
+
+# Initialize lists to store bootstrap results and confidence intervals
+results <- list()
+ci_list <- list()
+
+# Set the number of bootstrap iterations
+n <- 1000
+
+# Loop through each hour
+for (current_hour in hours) {
+  # Filter data for the current hour
+  hour_data <- data_2013 %>%
+    filter(hour == current_hour)
+  
+  # Calculate total counts for arrests and non-arrests
+  total_arrested <- sum(hour_data$Arrest == "True")
+  total_non_arrested <- sum(hour_data$Arrest == "False")
+  
+  # Check if there is enough data to proceed
+  if (total_arrested == 0 || total_non_arrested == 0) {
+    message(paste("Skipping Hour", sprintf("%02d", current_hour), 
+                  ": insufficient data (Arrested =", 
+                  total_arrested, ", Non-Arrested =", total_non_arrested, ")"))
+    next  # Skip this hour if no arrests or non-arrests
+  }
+  
+  # Perform bootstrap sampling using replicate for efficiency
+  store <- replicate(n, {
+    # Sample with replacement
+    arrest_sample <- sample(hour_data$Arrest == "True", total_arrested, replace = TRUE)
+    non_arrest_sample <- sample(hour_data$Arrest == "False", total_non_arrested, replace = TRUE)
+    
+    # Calculate arrest ratios
+    arrest_ratio_sample <- mean(arrest_sample)
+    non_arrest_ratio_sample <- mean(non_arrest_sample)
+    
+    # Difference in arrest ratios
+    arrest_ratio_sample - non_arrest_ratio_sample
+  })
+  
+  # Remove any NA values from the store (if any)
+  store <- store[!is.na(store)]
+  
+  # Check if store has enough data to calculate quantiles
+  if (length(store) < 2) {  # At least two points needed for quantiles
+    message(paste("Skipping Hour", sprintf("%02d", current_hour), 
+                  ": insufficient bootstrap samples after removing NAs"))
+    next
+  }
+  
+  # Calculate confidence intervals
+  ci <- quantile(store, probs = c(0.025, 0.975), na.rm = TRUE)
+  
+  # Store the bootstrap differences in a data frame with hour label
+  results[[sprintf("%02d", current_hour)]] <- data.frame(
+    hour = sprintf("%02d", current_hour),
+    means = store
+  )
+  
+  # Store the confidence intervals
+  ci_list[[sprintf("%02d", current_hour)]] <- ci
+}
+
+# Combine all bootstrap results into a single data frame
+combined_results <- bind_rows(results)
+
+# Create a data frame for confidence intervals
+ci_df <- bind_rows(lapply(names(ci_list), function(hour) {
+  data.frame(
+    hour = hour,
+    ci_lower = ci_list[[hour]][1],
+    ci_upper = ci_list[[hour]][2]
+  )
+}))
+
+# Convert 'hour' to a factor with ordered levels
+combined_results$hour <- factor(combined_results$hour, levels = sprintf("%02d", hours))
+ci_df$hour <- factor(ci_df$hour, levels = levels(combined_results$hour))
+
+# Plot the results
+bootstrap_plot <- ggplot(combined_results, aes(x = means, fill = hour)) +
+  geom_histogram(color = "black", bins = 30, alpha = 0.6, position = "identity") +
+  facet_wrap(~ hour, ncol = 6, scales = "free") +  # Adjust 'ncol' as needed for layout
+  geom_vline(data = ci_df, aes(xintercept = ci_lower), linetype = "dashed", color = "red") +
+  geom_vline(data = ci_df, aes(xintercept = ci_upper), linetype = "dashed", color = "red") +
+  labs(
+    title = "Bootstrap Distribution of Arrest ratio Differences by Hour",
+    x = "Arrest ratio Difference",
+    y = "Frequency",
+    fill = "Hour"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none")  # Hide legend as facets already indicate hours
+
+```
+
+![](./By%20Hour.png)
+
+This analysis employs a bootstrap-based hypothesis testing approach to compare the proportion of “arrested” cases with the proportion of “non-arrested” cases for each hour. The null hypothesis posits no difference between these proportions, whereas the alternative hypothesis suggests a significant difference.
+
+By resampling the data 1,000 times with replacement, the script generates a bootstrap distribution of arrest-ratio differences for each hour. The resulting 95% confidence intervals—derived from the 2.5th and 97.5th percentiles—consistently exclude zero. Because zero does not appear in any of these intervals, we reject the null hypothesis at the 5% significance level. This indicates that there are significant differences in arrest ratios between “arrested” and “non-arrested” cases for each hour.
+
+### By Crime Type
+
+```{r eval=FALSE}
+### Primary Type
+# Get unique primary types and sort them
+primary_types <- sort(unique(data_2013$Primary.Type))
+
+# Initialize lists to store bootstrap results and confidence intervals
+results <- list()
+ci_list <- list()
+
+# Set the number of bootstrap iterations
+n <- 1000
+
+# Loop through each primary type
+for (current_type in primary_types) {
+  # Filter data for the current primary type
+  type_data <- data_2013 %>%
+    filter(Primary.Type == current_type)
+  
+  # Calculate total counts for arrests and non-arrests
+  total_arrested <- sum(type_data$Arrest == "True")
+  total_non_arrested <- sum(type_data$Arrest == "False")
+  
+  # Check if there is enough data to proceed
+  if (total_arrested == 0 || total_non_arrested == 0) {
+    message(paste("Skipping Primary Type", current_type, 
+                  ": insufficient data (Arrested =", 
+                  total_arrested, ", Non-Arrested =", total_non_arrested, ")"))
+    next  # Skip this primary type if no arrests or non-arrests
+  }
+  
+  # Perform bootstrap sampling using replicate for efficiency
+  store <- replicate(n, {
+    # Sample with replacement
+    arrest_sample <- sample(type_data$Arrest == "True", total_arrested, replace = TRUE)
+    non_arrest_sample <- sample(type_data$Arrest == "False", total_non_arrested, replace = TRUE)
+    
+    # Calculate arrest ratios
+    arrest_ratio_sample <- mean(arrest_sample)
+    non_arrest_ratio_sample <- mean(non_arrest_sample)
+    
+    # Difference in arrest ratios
+    arrest_ratio_sample - non_arrest_ratio_sample
+  })
+  
+  # Remove any NA values from the store (if any)
+  store <- store[!is.na(store)]
+  
+  # Check if store has enough data to calculate quantiles
+  if (length(store) < 2) {  # At least two points needed for quantiles
+    message(paste("Skipping Primary Type", current_type, 
+                  ": insufficient bootstrap samples after removing NAs"))
+    next
+  }
+  
+  # Calculate confidence intervals
+  ci <- quantile(store, probs = c(0.025, 0.975), na.rm = TRUE)
+  
+  # Store the bootstrap differences in a data frame with primary type label
+  results[[current_type]] <- data.frame(
+    primary_type = current_type,
+    means = store
+  )
+  
+  # Store the confidence intervals
+  ci_list[[current_type]] <- ci
+}
+
+# Combine all bootstrap results into a single data frame
+combined_results <- bind_rows(results)
+
+# Create a data frame for confidence intervals
+ci_df <- bind_rows(lapply(names(ci_list), function(primary_type) {
+  data.frame(
+    primary_type = primary_type,
+    ci_lower = ci_list[[primary_type]][1],
+    ci_upper = ci_list[[primary_type]][2]
+  )
+}))
+
+# Convert 'primary_type' to a factor with ordered levels
+combined_results$primary_type <- factor(combined_results$primary_type, levels = primary_types)
+ci_df$primary_type <- factor(ci_df$primary_type, levels = levels(combined_results$primary_type))
+
+# Plot the results
+bootstrap_plot <- ggplot(combined_results, aes(x = means, fill = primary_type)) +
+  geom_histogram(color = "black", bins = 30, alpha = 0.6, position = "identity") +
+  facet_wrap(~ primary_type, ncol = 6, scales = "free") +  # Adjust 'ncol' as needed for layout
+  geom_vline(data = ci_df, aes(xintercept = ci_lower), linetype = "dashed", color = "red") +
+  geom_vline(data = ci_df, aes(xintercept = ci_upper), linetype = "dashed", color = "red") +
+  labs(
+    title = "Bootstrap Distribution of Arrest ratio Differences by Primary Type",
+    x = "Arrest ratio Difference",
+    y = "Frequency",
+    fill = "Primary Type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none")  # Hide legend as facets already indicate primary types
+```
+
+![](./By%20CrimeType.png)
+
+This analysis employs a bootstrap-based hypothesis testing approach to compare the proportion of “arrested” cases with the proportion of “non-arrested” cases for each crime type. The null hypothesis posits no difference between these proportions, whereas the alternative hypothesis suggests a significant difference.
+
+By resampling the data 1,000 times with replacement, the script generates a bootstrap distribution of arrest-ratio differences for each crime type. The resulting 95% confidence intervals—derived from the 2.5th and 97.5th percentiles—consistently exclude zero. Because zero does not appear in any of these intervals, we reject the null hypothesis at the 5% significance level. This indicates that there are significant differences in arrest ratios between “arrested” and “non-arrested” cases for each crime type.
+
+## Conclusion
+
+**Based on the EDA conducted, we can draw the following conclusions:**
+
+-   **Arrest Ratios by Crime Type**: The arrest ratios vary significantly across different crime types in Chicago. Some crime types, such as prostitution, gambling, and narcotics, have consistently high arrest ratios, while others, such as theft, battery, and criminal damage, have lower arrest ratios. These differences may be due to the nature of the crime, the difficulty of apprehending suspects, or other factors that influence arrest ratios.
+
+-   **Arrest Ratios by District**: The arrest ratios also vary across different districts in Chicago. While some districts have higher arrest ratios for certain crime types, others have lower arrest ratios. These variations may be influenced by law enforcement effectiveness, crime dynamics, or other district-specific factors.
+
+-   **Hourly Crime Trends**: Crime ratios tend to be higher during the midnight and lunch hours in Chicago. The arrest ratios, however, do not follow the same pattern, with the highest arrest ratios occurring around 7 pm and 8 pm. This suggests that the police force may be more active during these hours or that certain crime types are more likely to be reported during these times.
+
+**Based on the hypothesis testing conducted at the district, hour, and crime type levels, we can conclude the following:**
+
+-  **By District**: The results indicate no statistically significant difference in the arrest proportions across districts. Specifically, the 95% confidence intervals for the difference in arrest proportions consistently include zero, meaning we fail to reject the null hypothesis that there is no true difference between “arrested” and “non-arrested” proportions at the district level.
+
+-  **By Hour**: The results indicate a statistically significant difference in arrest proportions across hours. The 95% confidence intervals for the difference in arrest proportions consistently exclude zero, meaning we reject the null hypothesis of no difference at the hourly level.
+
+-  **By Crime Type**: The results indicate a statistically significant difference in arrest proportions across crime types. The 95% confidence intervals for the difference in arrest proportions consistently exclude zero, meaning we reject the null hypothesis of no difference at the crime type level.
+
+Overall, this analysis provides valuable insights into the arrest ratios and crime dynamics in Chicago, highlighting the variations in arrest ratios across different crime types, districts, and hours. By understanding these patterns, law enforcement agencies and policymakers can better allocate resources, improve crime prevention strategies, and enhance public safety in the city.
+
+## Acknowledgements
+Professor Jack O'Brien
+
+Chicago Police Department. Chicago Crime Data set. Kaggle. Available at: https://www.kaggle.com/datasets/chicago/chicago-crime
+
+Google Map Platform. Google Maps Geocoding API. Available at: https://developers.google.com/maps/documentation/geocoding/overview.
+
+
+
+
+
+
